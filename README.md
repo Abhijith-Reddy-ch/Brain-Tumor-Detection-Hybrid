@@ -140,7 +140,6 @@ Place your trained model file here:
 ckpts/best.pth
 ```
 
-O
 After running the server, open:
 
 👉 http://localhost:5000
