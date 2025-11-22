@@ -28,8 +28,10 @@ if BACKEND == "onnx":
     except Exception as e:
         print("Failed to load ONNX model:", e)
         MODEL = ("torch",) + load_torch_model()
+        print("Loaded PyTorch CNN model.")
 else:
     MODEL = ("torch",) + load_torch_model()  # ("torch", model, classes, device)
+    print("Loaded PyTorch CNN model.")
 
 @app.route("/", methods=["GET"])
 def index():

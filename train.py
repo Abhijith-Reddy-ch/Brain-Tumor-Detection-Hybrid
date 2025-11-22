@@ -1,18 +1,31 @@
 # train.py
+print("Starting train.py...")
 import os
+print("Imported os")
 import argparse
+print("Imported argparse")
 import time
+print("Imported time")
 import numpy as np
+print("Imported numpy")
 from collections import Counter
+print("Imported collections")
 
 import torch
+print("Imported torch")
 import torch.nn as nn
+print("Imported torch.nn")
 import torch.optim as optim
+print("Imported torch.optim")
 from torch.utils.data import DataLoader, WeightedRandomSampler
+print("Imported torch.utils.data")
 
 from dataset import get_transforms, BrainMRIDataset, make_file_lists
+print("Imported dataset")
 from model import create_model
+print("Imported model")
 from sklearn.metrics import confusion_matrix, classification_report
+print("Imported sklearn")
 
 def evaluate_metrics(model, loader, classes, device):
     model.eval()
@@ -63,12 +76,13 @@ def main(args):
     test_loader  = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False,
                               num_workers=args.num_workers, pin_memory=True)
 
-    model = create_model(num_classes=len(classes))
+    model = create_model(num_classes=len(classes), use_qnn=args.use_qnn)
     model = model.to(device)
     # class weights (alternative to sampler)
-    class_counts = [counter[i] for i in range(len(classes))]
-    class_weights = torch.tensor([ total / (len(classes) * c) for c in class_counts ], dtype=torch.float).to(device)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    # class weights (alternative to sampler) - REMOVED to avoid double weighting with sampler
+    # class_counts = [counter[i] for i in range(len(classes))]
+    # class_weights = torch.tensor([ total / (len(classes) * c) for c in class_counts ], dtype=torch.float).to(device)
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=3, factor=0.5)
 
@@ -163,7 +177,7 @@ def main(args):
 
     # load best and evaluate on test
     if os.path.exists(ckpt_path):
-        ckpt = torch.load(ckpt_path, map_location=device)
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt['model_state_dict'])
         print("Loaded best checkpoint for test eval.")
     test_acc, test_cm, test_report = evaluate_metrics(model, test_loader, classes, device)
@@ -178,8 +192,9 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt_dir", type=str, default="./checkpoints", help="where to save best model")
     parser.add_argument("--img_size", type=int, default=224)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--lr", type=float, default=2e-4)
-    parser.add_argument("--epochs", type=int, default=25)
+    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--use_qnn", action="store_true", help="Use Quantum Neural Network layer")
     args = parser.parse_args()
     main(args)

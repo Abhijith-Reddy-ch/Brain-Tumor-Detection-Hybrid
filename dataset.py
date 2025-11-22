@@ -1,38 +1,40 @@
 # dataset.py
+print("Starting dataset.py...")
 import os
+print("Imported os in dataset")
 from glob import glob
+print("Imported glob in dataset")
 from PIL import Image
+print("Imported PIL in dataset")
 import numpy as np
+print("Imported numpy in dataset")
 import torch
+print("Imported torch in dataset")
 from torch.utils.data import Dataset
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
+print("Imported Dataset in dataset")
+from torchvision import transforms
+print("Imported torchvision.transforms in dataset")
 
 IMG_SIZE = 224
 
 def get_transforms(img_size=IMG_SIZE):
     """
     Returns (train_transform, val_transform).
-    Uses tuple/keyword forms to be compatible across albumentations versions.
+    Uses torchvision transforms.
     """
-    size = (img_size, img_size)
-
-    train_transform = A.Compose([
-        # use Affine instead of ShiftScaleRotate (recommended)
-        A.Affine(translate_percent=0.06, scale=(0.92, 1.08), rotate=15, p=0.8),
-        A.RandomResizedCrop(size=size, scale=(0.8, 1.0), ratio=(0.9, 1.1)),
-        A.HorizontalFlip(p=0.5),
-        A.RandomBrightnessContrast(p=0.5),
-        # CoarseDropout expects height/width ints; use a relative proportion
-        A.CoarseDropout(max_holes=1, max_height=int(img_size * 0.08), max_width=int(img_size * 0.08), p=0.3),
-        A.Normalize(),
-        ToTensorV2(),
+    train_transform = transforms.Compose([
+        transforms.RandomAffine(degrees=20, translate=(0.1, 0.1), scale=(0.9, 1.1)),
+        transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0), ratio=(0.9, 1.1)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
 
-    val_transform = A.Compose([
-        A.Resize(height=img_size, width=img_size),
-        A.Normalize(),
-        ToTensorV2(),
+    val_transform = transforms.Compose([
+        transforms.Resize((img_size, img_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
     return train_transform, val_transform
 
@@ -48,9 +50,10 @@ class BrainMRIDataset(Dataset):
 
     def __getitem__(self, idx):
         p = self.paths[idx]
-        img = np.array(Image.open(p).convert("RGB"))
+        # Keep as PIL Image for torchvision
+        img = Image.open(p).convert("RGB")
         if self.transform:
-            img = self.transform(image=img)['image']
+            img = self.transform(img)
         label = torch.tensor(self.labels[idx], dtype=torch.long)
         return img, label
 

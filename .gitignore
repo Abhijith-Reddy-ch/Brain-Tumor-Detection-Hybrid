@@ -1,15 +1,74 @@
+# Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Virtual environments
 venv/
 .venv/
 env/
-ckpts/
-uploads/
+ENV/
+.env
+
+# Model weights and checkpoints
+checkpoints/*.pth
+checkpoints/*.pt
+checkpoints/*.onnx
 *.pth
-*.onnx
 *.pt
+*.onnx
+
+# Data directories
 data/
 datasets/
+Data/
+
+# Upload directories
+interface/uploads/*
+!interface/uploads/.gitkeep
+uploads/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Logs
+*.log
+logs/
+training.log
+
+# Temporary files from Hybrid repo creation
+HYBRID_*
+CREATE_HYBRID_DIRS.bat
+COPY_FILES_TO_HYBRID.bat
+ORGANIZE_HYBRID_REPO.bat
+*.tmp
+*.bak
+*.cache
+debug.bat
+run_temp.bat
+test_albu.py
+check_dirs.py
+qnn_utils.py
+run_train.bat
+install_deps.bat
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

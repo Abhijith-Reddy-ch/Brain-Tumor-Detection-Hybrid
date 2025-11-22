@@ -18,8 +18,8 @@ else:
         sys.path.insert(0, alt)
 
 # Paths (edit if needed)
-CKPT_PATH = r"C:\BrainTumorCNN\ckpts\best.pth"
-ONNX_PATH = r"C:\BrainTumorCNN\ckpts\brain_tumor_model.onnx"
+CKPT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "checkpoints", "best.pth"))
+ONNX_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "checkpoints", "brain_tumor_model.onnx"))
 
 DEFAULT_CLASSES = ['glioma', 'meningioma', 'notumor', 'pituitary']
 
