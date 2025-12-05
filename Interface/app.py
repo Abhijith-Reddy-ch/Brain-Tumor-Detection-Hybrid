@@ -6,7 +6,7 @@ from PIL import Image
 import io
 import uuid
 
-from model_utils import load_torch_model, predict_torch, tumor_present, compute_gradcam, load_onnx_model, predict_onnx
+from model_utils_hybrid import load_torch_model, predict_torch, tumor_present, compute_gradcam, load_onnx_model, predict_onnx
 
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXT = {"png","jpg","jpeg","bmp","tiff","gif"}

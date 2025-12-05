@@ -9,7 +9,7 @@ import cv2
 from typing import Tuple
 
 # add project folder (where model.py lives) to sys.path if not already
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "BrainTumorCNN"))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if os.path.isdir(PROJECT_ROOT) and PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 else:
@@ -32,7 +32,7 @@ transform = T.Compose([
 ])
 
 # ---------- model loading (robust) ----------
-def load_torch_model(ckpt_path=CKPT_PATH, device=None):
+def load_torch_model(ckpt_path=CKPT_PATH, device=None, use_qnn=True):
     import numpy as _np
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -67,7 +67,8 @@ def load_torch_model(ckpt_path=CKPT_PATH, device=None):
 
     classes = ckpt.get('classes', DEFAULT_CLASSES)
     from model import create_model
-    model = create_model(num_classes=len(classes))
+    # Hybrid model.py accepts use_qnn
+    model = create_model(num_classes=len(classes), use_qnn=use_qnn)
     if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
         model.load_state_dict(ckpt['model_state_dict'])
     else:
@@ -139,9 +140,9 @@ def find_conv_modules(model: torch.nn.Module):
 
 def compute_gradcam(model: torch.nn.Module, device, pil_img: Image.Image, target_class: int = None):
     """
-    Simplified Grad-CAM that avoids backward hooks:
-    - Uses direct gradient computation
-    - Works with models that have custom functions
+    Standard Grad-CAM implementation:
+    - Uses forward hook to get activations
+    - Uses backward hook to get gradients w.r.t activations
     """
     model.eval()
     
@@ -156,67 +157,69 @@ def compute_gradcam(model: torch.nn.Module, device, pil_img: Image.Image, target
     
     # Prepare input
     x = preprocess_pil(pil_img).to(device)
-    x.requires_grad = True
+    # We don't need x.requires_grad for the input image itself for Grad-CAM, 
+    # but we need to ensure the model parameters require grad if we were training, 
+    # but here we are in eval mode. 
+    # However, to get gradients back to the layer, we need to ensure the graph is built.
+    # Since we are in inference, we usually use torch.set_grad_enabled(True) context or just don't use no_grad.
     
-    # Storage for activations
     activations = None
-    
+    gradients = None
+
     def forward_hook(module, input, output):
         nonlocal activations
-        activations = output.detach()
-    
-    # Register hook
-    handle = target_layer.register_forward_hook(forward_hook)
+        activations = output
+
+    def backward_hook(module, grad_input, grad_output):
+        nonlocal gradients
+        gradients = grad_output[0]
+
+    # Register hooks
+    f_handle = target_layer.register_forward_hook(forward_hook)
+    b_handle = target_layer.register_full_backward_hook(backward_hook)
     
     try:
         # Forward pass
+        # We need gradients, so we must NOT use torch.no_grad()
+        # and we might need to ensure the input requires grad if the model was fully frozen?
+        # Usually for inference models, params have requires_grad=True unless explicitly frozen.
+        # If they are frozen, we can't get gradients w.r.t weights, but we can get w.r.t activations 
+        # IF we ensure the tensor requires grad? No, intermediate tensors require grad if input or params do.
+        # Let's assume params have requires_grad=True. If not, we might need to set them.
+        
         output = model(x)
         
         if target_class is None:
             target_class = output.argmax(dim=1).item()
         
-        # Get the score for target class
+        # Zero grads
+        model.zero_grad()
+        
+        # Target for backprop
         score = output[0, target_class]
         
         # Backward pass
-        model.zero_grad()
         score.backward()
         
-        # Get gradients from the input
-        gradients = x.grad
-        
-        # Pool gradients across channels
+        # Generate heatmap
         if gradients is not None and activations is not None:
-            # Use activations and compute importance
-            pooled_gradients = torch.mean(gradients, dim=[0, 2, 3])
+            # Global Average Pooling of gradients
+            weights = torch.mean(gradients, dim=[2, 3], keepdim=True)
             
-            # Weight the channels by the gradients
-            for i in range(activations.shape[1]):
-                activations[:, i, :, :] *= pooled_gradients[i]
+            # Weighted combination of activations
+            cam = torch.sum(weights * activations, dim=1, keepdim=True)
             
-            # Average the channels
-            heatmap = torch.mean(activations, dim=1).squeeze()
-            heatmap = torch.relu(heatmap)
-            heatmap = heatmap.cpu().numpy()
+            # ReLU
+            cam = torch.relu(cam)
             
             # Normalize
-            if heatmap.max() > 0:
-                heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
-            else:
-                heatmap = np.zeros_like(heatmap)
+            cam = cam - cam.min()
+            cam = cam / (cam.max() + 1e-8)
+            
+            heatmap = cam.squeeze().detach().cpu().numpy()
         else:
-            # Fallback: create a simple heatmap based on activations only
-            if activations is not None:
-                heatmap = torch.mean(activations, dim=1).squeeze()
-                heatmap = torch.relu(heatmap).cpu().numpy()
-                if heatmap.max() > 0:
-                    heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
-                else:
-                    heatmap = np.zeros_like(heatmap)
-            else:
-                # Last resort: return empty heatmap
-                heatmap = np.zeros((7, 7))
-        
+            heatmap = np.zeros((7, 7))
+            
         # Resize and overlay
         orig = np.array(pil_img.convert("RGB"))
         heatmap_resized = cv2.resize(heatmap, (orig.shape[1], orig.shape[0]))
@@ -227,7 +230,8 @@ def compute_gradcam(model: torch.nn.Module, device, pil_img: Image.Image, target
         return overlay, heatmap_resized
         
     finally:
-        handle.remove()
+        f_handle.remove()
+        b_handle.remove()
 
 # ---------- helper: tumor presence ----------
 def tumor_present(pred_result):
