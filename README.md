@@ -352,7 +352,7 @@ This model is:
 
 For questions, collaborations, or issues:
 - Open an [Issue](https://github.com/Abhijith-Reddy-ch/Brain-Tumor-Detection-Hybrid/issues)
-- Email: [abhijithreddychalamalla@gmail.com](Abhijithreddychalamalla@gmail.com)[sreesaivikas35@gmail.com](sreesaivikas35@gmail.com)
+- Email: [abhijithreddychalamalla@gmail.com](Abhijithreddychalamalla@gmail.com) & [sreesaivikas35@gmail.com](sreesaivikas35@gmail.com)
 - LinkedIn: [Abhijith_Reddy_Ch](https://www.linkedin.com/in/abhijith-reddy-chalamalla/)
 
 ## 📊 Citation
