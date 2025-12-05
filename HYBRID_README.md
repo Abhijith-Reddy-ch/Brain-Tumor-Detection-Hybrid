@@ -346,24 +346,24 @@ This model is:
 - **Base Model**: [EfficientNet](https://arxiv.org/abs/1905.11946) (Tan & Le, 2019)
 - **Quantum ML**: [PennyLane](https://pennylane.ai/) (Xanadu Quantum Technologies)
 - **Explainability**: [Grad-CAM](https://arxiv.org/abs/1610.02391) (Selvaraju et al., 2017)
-- **Maintainer**: [Abhijith Reddy Ch](https://github.com/Abhijith-Reddy-ch) [Sree_Sai_Vikas](sreesaivikas35@gmail.com)
+- **Maintainer**: [Abhijith Reddy Ch](https://github.com/Abhijith-Reddy-ch)
 
 ## 📧 Contact
 
 For questions, collaborations, or issues:
 - Open an [Issue](https://github.com/Abhijith-Reddy-ch/Brain-Tumor-Detection-Hybrid/issues)
-- Email: [abhijithreddychalamalla@gmail.com](Abhijithreddychalamalla@gmail.com) & [sreesaivikas35@gmail.com](sreesaivikas35@gmail.com)
-- LinkedIn: [Abhijith_Reddy_Ch](https://www.linkedin.com/in/abhijith-reddy-chalamalla/)
+- Email: [Your Email]
+- LinkedIn: [Your LinkedIn]
 
 ## 📊 Citation
 
 If you use this project in your research, please cite:
 
 ```bibtex
-@software{brain_tumor_qnn_2025,
-  author = {Abhijith Reddy Ch, Sree Sai Vikas},
+@software{brain_tumor_qnn_2024,
+  author = {Abhijith Reddy Ch},
   title = {Brain Tumor Detection with Quantum Neural Networks},
-  year = {2025},
+  year = {2024},
   url = {https://github.com/Abhijith-Reddy-ch/Brain-Tumor-Detection-Hybrid}
 }
 ```

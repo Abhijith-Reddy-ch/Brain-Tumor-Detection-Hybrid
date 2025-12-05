@@ -1,0 +1,7 @@
+flask==2.2.5
+torch>=2.0.0
+torchvision
+pillow
+numpy
+onnxruntime             # optional - needed only if using ONNX backend
+gunicorn                # optional for production

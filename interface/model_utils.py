@@ -9,7 +9,7 @@ import cv2
 from typing import Tuple
 
 # add project folder (where model.py lives) to sys.path if not already
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "BrainTumorCNN"))
 if os.path.isdir(PROJECT_ROOT) and PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 else:
@@ -67,7 +67,6 @@ def load_torch_model(ckpt_path=CKPT_PATH, device=None, use_qnn=True):
 
     classes = ckpt.get('classes', DEFAULT_CLASSES)
     from model import create_model
-    # Hybrid model.py accepts use_qnn
     model = create_model(num_classes=len(classes), use_qnn=use_qnn)
     if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
         model.load_state_dict(ckpt['model_state_dict'])
@@ -140,98 +139,113 @@ def find_conv_modules(model: torch.nn.Module):
 
 def compute_gradcam(model: torch.nn.Module, device, pil_img: Image.Image, target_class: int = None):
     """
-    Standard Grad-CAM implementation:
-    - Uses forward hook to get activations
-    - Uses backward hook to get gradients w.r.t activations
+    Robust Grad-CAM:
+    - registers forward hooks on ALL Conv2d layers,
+    - picks the last layer that produced activations,
+    - computes gradients and CAM, returns overlay (RGB numpy) and heatmap (0..1 float).
     """
     model.eval()
-    
-    # Find the last convolutional layer
-    target_layer = None
-    for name, module in model.named_modules():
-        if isinstance(module, nn.Conv2d):
-            target_layer = module
-    
-    if target_layer is None:
-        raise RuntimeError("No Conv2d layer found for Grad-CAM")
-    
-    # Prepare input
-    x = preprocess_pil(pil_img).to(device)
-    # We don't need x.requires_grad for the input image itself for Grad-CAM, 
-    # but we need to ensure the model parameters require grad if we were training, 
-    # but here we are in eval mode. 
-    # However, to get gradients back to the layer, we need to ensure the graph is built.
-    # Since we are in inference, we usually use torch.set_grad_enabled(True) context or just don't use no_grad.
-    
-    activations = None
-    gradients = None
+    x = preprocess_pil(pil_img).to(device)  # 1,C,H,W
 
-    def forward_hook(module, input, output):
-        nonlocal activations
-        activations = output
+    # find all conv modules
+    convs = find_conv_modules(model)
+    if not convs:
+        raise RuntimeError("No Conv2d modules found in model for Grad-CAM.")
 
-    def backward_hook(module, grad_input, grad_output):
-        nonlocal gradients
-        gradients = grad_output[0]
+    activations_map = {}
+    gradients_map = {}
 
-    # Register hooks
-    f_handle = target_layer.register_forward_hook(forward_hook)
-    b_handle = target_layer.register_full_backward_hook(backward_hook)
-    
-    try:
-        # Forward pass
-        # We need gradients, so we must NOT use torch.no_grad()
-        # and we might need to ensure the input requires grad if the model was fully frozen?
-        # Usually for inference models, params have requires_grad=True unless explicitly frozen.
-        # If they are frozen, we can't get gradients w.r.t weights, but we can get w.r.t activations 
-        # IF we ensure the tensor requires grad? No, intermediate tensors require grad if input or params do.
-        # Let's assume params have requires_grad=True. If not, we might need to set them.
-        
-        output = model(x)
-        
-        if target_class is None:
-            target_class = output.argmax(dim=1).item()
-        
-        # Zero grads
-        model.zero_grad()
-        
-        # Target for backprop
-        score = output[0, target_class]
-        
-        # Backward pass
-        score.backward()
-        
-        # Generate heatmap
-        if gradients is not None and activations is not None:
-            # Global Average Pooling of gradients
-            weights = torch.mean(gradients, dim=[2, 3], keepdim=True)
-            
-            # Weighted combination of activations
-            cam = torch.sum(weights * activations, dim=1, keepdim=True)
-            
-            # ReLU
-            cam = torch.relu(cam)
-            
-            # Normalize
-            cam = cam - cam.min()
-            cam = cam / (cam.max() + 1e-8)
-            
-            heatmap = cam.squeeze().detach().cpu().numpy()
-        else:
-            heatmap = np.zeros((7, 7))
-            
-        # Resize and overlay
-        orig = np.array(pil_img.convert("RGB"))
-        heatmap_resized = cv2.resize(heatmap, (orig.shape[1], orig.shape[0]))
-        heatmap_uint8 = np.uint8(255 * heatmap_resized)
-        colored_heatmap = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
-        overlay = (0.4 * colored_heatmap.astype(float) + 0.6 * orig.astype(float)).astype(np.uint8)
-        
-        return overlay, heatmap_resized
-        
-    finally:
-        f_handle.remove()
-        b_handle.remove()
+    # forward hooks -> save activations
+    forward_handles = []
+    def make_fwd_hook(key):
+        def hook(module, inp, out):
+            # store a detached copy (we will need it on CPU later)
+            activations_map[key] = out
+        return hook
+
+    # backward hooks -> save gradients
+    backward_handles = []
+    def make_bwd_hook(key):
+        def hook(module, grad_in, grad_out):
+            # grad_out[0] corresponds to gradient w.r.t. module output
+            gradients_map[key] = grad_out[0]
+        return hook
+
+    # register hooks on all conv modules
+    for name, mod in convs:
+        forward_handles.append(mod.register_forward_hook(make_fwd_hook(name)))
+        # use register_full_backward_hook if available, otherwise register_backward_hook
+        try:
+            backward_handles.append(mod.register_full_backward_hook(make_bwd_hook(name)))
+        except AttributeError:
+            backward_handles.append(mod.register_backward_hook(make_bwd_hook(name)))
+
+    # forward pass
+    logits = model(x)  # shape (1, num_classes)
+    probs = torch.softmax(logits, dim=1)
+    if target_class is None:
+        target_class = int(probs.argmax(dim=1).item())
+
+    # backward pass for the target class score
+    model.zero_grad()
+    # ensure scalar selection
+    score = logits[:, target_class].squeeze()
+    # if score is not scalar (rare), sum
+    if score.dim() != 0:
+        score = score.sum()
+    score.backward(retain_graph=True)
+
+    # remove hooks
+    for h in forward_handles + backward_handles:
+        try: h.remove()
+        except Exception: pass
+
+    # choose the last conv that actually produced activations and gradients
+    last_key = None
+    for name, _ in convs:
+        if name in activations_map and name in gradients_map:
+            last_key = name
+
+    if last_key is None:
+        # fallback: choose the last conv that produced activations even if gradients missing
+        for name, _ in reversed(convs):
+            if name in activations_map:
+                last_key = name
+                break
+
+    if last_key is None:
+        raise RuntimeError("Grad-CAM failed: no activations captured from any Conv2d layers.")
+
+    act = activations_map[last_key]   # Tensor shape (1, C, H, W)
+    grad = gradients_map.get(last_key, None)  # may be None in fallback
+
+    if grad is None:
+        # try to compute gradients by re-running backward on a small scalar loss
+        raise RuntimeError(f"Gradients not captured for layer {last_key}; ensure model allows backprop to conv outputs.")
+
+    # compute weights: global average pooling of gradients over spatial dims
+    # shape: (1, C, 1, 1)
+    weights = torch.mean(grad, dim=(2,3), keepdim=True)
+
+    # weighted sum of activations
+    gcam_map = torch.sum(weights * act, dim=1, keepdim=True)  # shape (1,1,H,W)
+    gcam_map = torch.relu(gcam_map)
+    gcam_map = gcam_map.squeeze().cpu().numpy()  # H x W
+
+    # normalize to 0-1
+    if gcam_map.max() > 0:
+        gcam_map = (gcam_map - gcam_map.min()) / (gcam_map.max() - gcam_map.min() + 1e-8)
+    else:
+        gcam_map = np.zeros_like(gcam_map)
+
+    # overlay on original image
+    orig = np.array(pil_img.convert("RGB"))
+    heatmap = cv2.resize(gcam_map, (orig.shape[1], orig.shape[0]))
+    heatmap_uint8 = np.uint8(255 * heatmap)
+    cmap = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)  # BGR
+    overlay = (0.4 * cmap.astype(float) + 0.6 * orig.astype(float)).astype(np.uint8)
+
+    return overlay, heatmap
 
 # ---------- helper: tumor presence ----------
 def tumor_present(pred_result):
